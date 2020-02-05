@@ -126,11 +126,11 @@ and follow the prompts.
 
 ## example Query
 
-{{
+{
   solverAssignmentWithSizes(
     costs: {
       id: "costs"
-        row:  [
+        row: [
             {     id: "row0"
                   values: [ 90, 76, 75, 70, 50, 74, 12, 68 ]
             },
@@ -166,7 +166,6 @@ and follow the prompts.
                values: [3,45,76, 54, 88,99,11, 42]
             },
             
-          
         ]
                
     }
