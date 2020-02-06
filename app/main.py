@@ -75,6 +75,33 @@ def getClient():
 # Define types using Schema Definition Language (https://graphql.org/learn/schema/)
 # Wrapping string in gql function provides validation and better error traceback
 type_defs = gql("""
+
+## TODO AG - change nodeSet to string so different categories of constraint can be passed? Worker, task, group
+type AssignmentGroupConstraint {
+  id: ID!
+  groupsMatrix: [[Int]]
+  upperBound: Int
+  lowerBound: Int
+  nodeSet: Boolean
+}
+
+input AssignmentGroupConstraintAsInput {
+  id: ID!
+  groupsMatrix: [[Int]]
+  upperBound: Int
+  lowerBound: Int
+  nodeSet: Boolean
+}
+
+type AssignmentGroupSolution {
+  id: ID!
+  nodeSetA: [Int]
+  nodeSetB: [Int]
+  cost: [Int]
+  objectiveValue: Float
+  status: String
+}
+
 type AssignmentConstraint {
   id: ID!
   vectorOfCoefficients: IntegerCoefficientVector
@@ -158,6 +185,13 @@ type Query {
         objective: AssignmentObjectiveAsInput
         ): AssignmentSolution
 
+    solverAssignmentWithGroups(
+        costs: CostMatrixAsInput, 
+        constraints: [AssignmentGroupConstraintAsInput], 
+        objective: AssignmentObjectiveAsInput
+        ): AssignmentGroupSolution
+
+
 }
 """)
 
@@ -233,6 +267,145 @@ def resolve_solverAssignmentWithSizes(*_, costs, constraints, objective):
       "cost": cost,
       "objectiveValue": solver.ObjectiveValue(),
       "status": status
+    }
+
+
+# Assignment Resolver with Groups
+@query.field("solverAssignmentWithGroups")
+def resolve_solverAssignmentWithGroups(*_, costs, constraints, objective):
+    id = "Assignment Incl Groups With CP-SAT"
+
+    group_constraints_exist_flag = False
+
+    print(f'DEBUG: here are costs {costs}')
+    print(f'DEBUG: here are constraints {constraints}')
+
+    groups_dict = {}
+    groups_dict_workers = {}
+    for item in constraints:
+        if item["nodeSet"] is False: # hard coded variable name exclusion, therefore may need generalising
+            group_constraints_exist_flag = True
+            groups_dict[item["id"]] = item["groupsMatrix"]
+
+
+    print(f'here is groups dict {groups_dict}')
+
+    print(f'group dict keys {groups_dict.keys()}')
+
+    print(f'here is objective {objective}')
+
+
+    # Create model
+    model = cp_model.CpModel()
+    # Get the number of workers
+    num_workers = len(costs["row"])
+    # Get the number of tasks
+    num_tasks = len(costs["row"][0]["values"])
+
+    # Create the variables
+
+    x = []
+    for i in range(num_workers):
+        t = []
+        for j in range(num_tasks):
+            t.append(model.NewIntVar(0, 1, "x[%i,%i]" % (i, j)))
+        x.append(t)
+
+
+    # Constraints
+
+    # Each task is assigned to at least one worker.
+    [model.Add(sum(x[i][j] for i in range(num_workers)) == 1)
+     for j in range(num_tasks)]
+
+    # Each worker is assigned to at most one task.
+    [model.Add(sum(x[i][j] for j in range(num_tasks)) <= 1)
+     for i in range(num_workers)]
+
+    #
+    # Constraints
+
+    # hard coded constraints
+
+    ## the following is hard coded in - feels wrong and that is should be passed as a contraint
+
+    # Each worker is assigned to at most one task.
+    [model.Add(sum(x[i][j] for j in range(num_tasks)) <= 1)
+     for i in range(num_workers)]
+
+    # Create variables for each worker, indicating whether they work on some task.
+    work = []
+    for i in range(num_workers):
+        work.append(model.NewIntVar(0, 1, "work[%i]" % i))
+
+    for i in range(num_workers):
+        for j in range(num_tasks):
+            model.Add(work[i] == sum(x[i][j] for j in range(num_tasks)))
+
+
+
+    ##### passed constraints
+
+    for constraint in constraints:
+        if (constraint["nodeSet"]):
+            # this is a constraint about workers
+#            [model.Add(sum(x[i][j] for i in range(num_workers)) >= constraint["lowerBound"]) for j in range(num_tasks)]
+            # not sure about the evaluation of num_workers
+            [model.Add(sum(x[i][j] for i in range(num_workers)) <= constraint["lowerBound"]) for j in range(num_tasks)]
+#    print(f'here is model {model}')
+        else:
+
+    # Define the allowed groups of workers - this should work independently of number of groups passed in via constraints
+            if group_constraints_exist_flag:
+                group_item_counter = 0
+                for key in groups_dict.keys():
+                    generated_worker_list = []
+                    if len(groups_dict[key]) > 0:
+                        if len(groups_dict[key][0]) > 0:
+                            group_item_counter += len(groups_dict[key][0])
+                            for worker_item in list(range((group_item_counter - len(groups_dict[key][0])), group_item_counter)):
+                                generated_worker_list.append(work[worker_item])
+                            print(f'DEBUG: for {key} generated workers are {generated_worker_list}')
+                            model.AddAllowedAssignments(generated_worker_list, groups_dict[key])
+
+
+    # # Create the objective function
+    if objective["minimize"]:
+        model.Minimize(sum([costs["row"][i]["values"][j] * x[i][j] for i in range(num_workers)
+                            for j in range(num_tasks)]))
+
+    # Run the solver and return results
+
+    # declare solver
+    solver = cp_model.CpSolver()
+    status = solver.Solve(model)
+
+
+    if status != cp_model.OPTIMAL:
+        print(f'non-optimal status{status}')
+    else:
+        print(f'optimal status {status}')
+    #
+        status = "OPTIMAL"
+    #
+    nodeSetA = []
+    nodeSetB = []
+    cost = []
+    #
+    for i in range(num_workers):
+        for j in range(num_tasks):
+            if solver.Value(x[i][j]) == 1:
+                nodeSetA.append(i)
+                nodeSetB.append(j)
+                cost.append(costs["row"][i]["values"][j])
+
+    return {
+        "id": id,
+        "nodeSetA": nodeSetA,
+        "nodeSetB": nodeSetB,
+        "cost": cost,
+        "objectiveValue": solver.ObjectiveValue(),
+        "status": status
     }
 
 
