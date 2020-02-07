@@ -76,10 +76,10 @@ def getClient():
 # Wrapping string in gql function provides validation and better error traceback
 type_defs = gql("""
 
-## TODO AG - change nodeSet to string so different categories of constraint can be passed? Worker, task, group
+## TODO change nodeSet to string so different categories of constraint can be passed? Worker, task, group
 type AssignmentGroupConstraint {
   id: ID!
-  groupsMatrix: [[Int]]
+  groupsMatrix: [Row]
   upperBound: Int
   lowerBound: Int
   nodeSet: Boolean
@@ -87,7 +87,7 @@ type AssignmentGroupConstraint {
 
 input AssignmentGroupConstraintAsInput {
   id: ID!
-  groupsMatrix: [[Int]]
+  groupsMatrix: [RowAsInput]
   upperBound: Int
   lowerBound: Int
   nodeSet: Boolean
@@ -285,8 +285,15 @@ def resolve_solverAssignmentWithGroups(*_, costs, constraints, objective):
     for item in constraints:
         if item["nodeSet"] is False: # hard coded variable name exclusion, therefore may need generalising
             group_constraints_exist_flag = True
-            groups_dict[item["id"]] = item["groupsMatrix"]
+            print(f'group dict item {item["groupsMatrix"]}')
+            group_list_to_pass = []
+            for row in item["groupsMatrix"]:
 
+                print(f'NEW groups dict item from list {row["values"]}')
+                group_list_to_pass.append(row["values"])
+
+            groups_dict[item["id"]] = group_list_to_pass
+            print(f'here finally we have the matrix {group_list_to_pass}')
 
     print(f'here is groups dict {groups_dict}')
 
